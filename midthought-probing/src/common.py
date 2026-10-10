@@ -14,7 +14,32 @@ CONFIG_PATH = APP_ROOT / 'config' / 'experiment.json'
 def load_config(path: str | None = None) -> dict:
     config_path = Path(path) if path else CONFIG_PATH
     with open(config_path, 'r', encoding='utf-8') as fh:
-        return json.load(fh)
+        if config_path.suffix.lower() in {".yaml", ".yml"}:
+            try:
+                import yaml
+            except ImportError as exc:
+                raise RuntimeError("YAML configs require PyYAML. Install requirements.txt.") from exc
+            config = yaml.safe_load(fh) or {}
+        else:
+            config = json.load(fh)
+    # Keep the original JSON script interface compatible with the richer YAML schema.
+    dataset = config.get("dataset", {})
+    model = config.get("model", {})
+    experiment = config.get("experiment", {})
+    outputs = config.get("outputs", {})
+    config.setdefault("dataset_name", dataset.get("name", "gsm8k"))
+    config.setdefault("model_name", model.get("id"))
+    config.setdefault("device", model.get("device", "cpu"))
+    config.setdefault("max_new_tokens", experiment.get("max_new_tokens", 256))
+    config.setdefault("prefer_local_layer", experiment.get("layer_index", -1))
+    config.setdefault(
+        "snapshot_percentages",
+        experiment.get("checkpoints", [10, 20, 30, 40, 50, 60, 70, 80, 90]),
+    )
+    config.setdefault("output_dir", outputs.get("results", "results"))
+    config.setdefault("figure_dir", outputs.get("figures", "figs"))
+    config.setdefault("trace_dir", outputs.get("runs", "runs"))
+    return config
 
 
 def ensure_dir(path: str | Path) -> Path:

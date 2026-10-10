@@ -1,0 +1,23 @@
+project_name: midthought-probing
+dataset:
+  name: gsm8k
+  split: test
+  max_items: 1
+model:
+  id: Qwen/Qwen2.5-1.5B-Instruct
+  path: null
+  local_files_only: false
+  trust_remote_code: false
+  device: cpu
+  device_map: null
+  torch_dtype: float32
+  load_in_4bit: false
+experiment:
+  seed: 42
+  max_new_tokens: 256
+  layer_index: -1
+  checkpoints: [10, 20, 30, 40, 50, 60, 70, 80, 90]
+outputs:
+  runs: runs
+  results: results
+  figures: figs

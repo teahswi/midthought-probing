@@ -1,0 +1,23 @@
+project_name: midthought-probing
+dataset:
+  name: gsm8k
+  split: test
+  max_items: 1500
+model:
+  id: Qwen/Qwen3-8B
+  path: C:\models\qwen3-8b
+  local_files_only: true
+  trust_remote_code: true
+  device: cuda
+  device_map: auto
+  torch_dtype: bfloat16
+  load_in_4bit: true
+experiment:
+  seed: 42
+  max_new_tokens: 512
+  layer_index: -1
+  checkpoints: [10, 20, 30, 40, 50, 60, 70, 80, 90]
+outputs:
+  runs: runs
+  results: results
+  figures: figs

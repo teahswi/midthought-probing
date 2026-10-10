@@ -1,49 +1,174 @@
-# Mid-Thought Probing for Early Prediction of Reasoning Failure
+# Mid-Thought Probing: Latent Correctness Probe
 
-This project tests whether hidden representations from a reasoning model carry information about whether the model's eventual mathematical answer will be correct before reasoning is complete.
+This repository evaluates whether internal hidden-state signals in reasoning models predict answer correctness early enough to support inference-time analysis or control.
 
-## Quick start
+The core method is the **Latent Correctness Probe**: a lightweight classifier trained on intermediate transformer hidden states to predict whether a generated mathematical answer will eventually be correct. The probe is treated as a decodable signal, not as evidence that a model consciously knows its answer is wrong.
 
-```powershell
-cd "c:\Users\tejas\llm confidence probe\midthought-probing"
-python -m venv .venv
-.\.venv\Scripts\Activate.ps1
-python -m pip install --upgrade pip
-python -m pip install -r requirements.txt
-python src\check_environment.py --model-name "deepseek-ai/DeepSeek-R1-Distill-Qwen-1.5B"
-python src\run_pipeline.py --smoke-test --sample-limit 1 --model-name "deepseek-ai/DeepSeek-R1-Distill-Qwen-1.5B"
+## Repository layout
+
+```text
+src/
+  probing/
+    analysis.py       # Baselines and result metadata audits
+    collection.py     # Generation + prefix-state collection
+    config.py         # Seeds and checkpoint constants
+    data.py           # Dataset loading and numeric answer parsing
+    features.py       # Token-position and hidden-state extraction
+    generation.py     # Prompting and greedy decoding
+    labels.py         # Gold-vs-generated correctness
+    probes.py         # Logistic-regression probes
+  plotting/
+    metrics.py        # Matplotlib diagnostics
+main.py              # Config-driven CLI
+configs/              # Versioned YAML experiment configurations
+scripts/              # Windows launcher and dataset utilities
+data/                 # Local manifests and intermediate artifacts
+runs/                 # Cached JSONL generations
+results/              # Metrics, reports, and metadata
+figs/                 # Published PNG figures
+tests/                # Unit tests
 ```
 
-## Smallest viable configuration before downloading large model weights
+## Important model constraint
 
-- CPU-only environment: use `--model-name` to point to a smaller or locally cached model; the default configuration targets `deepseek-ai/DeepSeek-R1-Distill-Qwen-1.5B` but only if it can load without OOM.
-- If Hugging Face weights are unavailable or the environment is too constrained, use the debug fallback model configured in `config/experiment.json` for pipeline validation.
-- Ollama is only an optional baseline for output generation and does not expose the hidden states needed for the probe.
+Ollama completion APIs do not expose the per-token hidden states required by the latent-probe pipeline. Ollama models can be used for a separate generation comparison, but the full probe workflow requires the equivalent model checkpoint loaded with Hugging Face Transformers.
 
-## Project structure
+An Ollama model directory is also not a Transformers checkpoint. For a local Transformers model, `model.path` must point to a directory containing the tokenizer and model files.
 
-- `src/` contains the pipeline scripts.
-- `config/experiment.json` stores default settings.
-- `results/` stores metrics, predictions, summary documents, and generated figures.
-- `tests/` contains automated tests.
+## Windows setup
 
-## Reproducibility
-
-Run the full pipeline with:
+From PowerShell in the repository root:
 
 ```powershell
-python src\run_pipeline.py --sample-limit 8 --seed 42 --output-dir results --model-name "deepseek-ai/DeepSeek-R1-Distill-Qwen-1.5B"
+py -3.11 -m venv .venv
+.\.venv\Scripts\python.exe -m pip install -r requirements.txt
+$env:PYTHONPATH = "src"
 ```
 
-To regenerate plots from saved results only:
+For a local checkpoint:
 
 ```powershell
-python src\plot_results.py --metrics-csv results\metrics_by_position.csv --predictions-csv results\predictions.csv --output-dir results\figures --dpi 160
+notepad .\configs\local_qwen3_8b_windows.yaml
+powershell -ExecutionPolicy Bypass -File .\scripts\run_local_windows.ps1 `
+  -ModelPath 'C:\models\qwen3-8b'
 ```
 
-## Notes
+The launcher sets the local model path and invokes the config-driven commands. Four-bit loading is only attempted on CUDA and requires a working `bitsandbytes` installation. CPU runs use float32.
 
-- The experiment is intentionally designed to avoid evaluating on the same examples used for training.
-- Correctness is determined by a robust numeric parser over the final answer text.
-- Hidden states are extracted from exact token positions at fixed reasoning-progress checkpoints.
-- Unit tests use synthetic fixtures and never mix synthetic data with real evaluation results.
+## Config-driven CLI
+
+Every substantive command accepts a versioned YAML configuration. Dry runs validate command wiring without loading a model:
+
+```powershell
+$env:PYTHONPATH = "src"
+python .\main.py make-splits --config .\configs\qwen_math_smoke.yaml --dry-run
+python .\main.py generation --config .\configs\qwen_math_smoke.yaml --dry-run
+python .\main.py hidden-state-extraction --config .\configs\qwen_math_smoke.yaml --dry-run
+```
+
+The legacy scripts remain available directly:
+
+```powershell
+python .\src\check_environment.py --model-name "deepseek-ai/DeepSeek-R1-Distill-Qwen-1.5B"
+python .\src\run_pipeline.py --smoke-test --sample-limit 1
+python .\src\run_pipeline.py --sample-limit 8 --seed 42
+```
+
+The current environment may prevent native PyTorch or pandas extensions from loading under Windows Application Control. In that case, the environment check and unit tests still provide useful validation, but no real hidden-state experiment should be claimed.
+
+## Typical workflow
+
+### 1. Load a math split
+
+```python
+from probing.data import load_math_split
+
+examples = load_math_split(
+    split="train",
+    min_level=1,
+    require_numeric=True,
+    max_items=1500,
+)
+```
+
+### 2. Generate traces and prefix states
+
+```python
+from transformers import AutoModelForCausalLM, AutoTokenizer
+from probing.collection import build_probe_data
+
+model_id = "Qwen/Qwen3-8B"
+tokenizer = AutoTokenizer.from_pretrained(model_id)
+model = AutoModelForCausalLM.from_pretrained(model_id, device_map="auto")
+
+features_by_t, labels_by_t, metadata = build_probe_data(
+    model=model,
+    tokenizer=tokenizer,
+    math_data=examples,
+    max_items=1500,
+)
+```
+
+The collection code records actual token IDs and selects hidden states at token positions corresponding to reasoning progress. It never uses verbal confidence claims as features.
+
+### 3. Train probes and baselines
+
+```python
+from probing.probes import run_all_probes
+from probing.analysis import analyze_baselines
+
+metrics = run_all_probes(features_by_t, labels_by_t, seed=42)
+summary = analyze_baselines(metadata, metrics, results_path="results/probe_summary.json")
+```
+
+The probe is fitted separately at each checkpoint. Scaling is fitted on the training portion only. Evaluation questions must remain disjoint from training questions.
+
+### 4. Plot cached results
+
+```python
+from plotting import plot_probe_results
+
+plot_probe_results(
+    metrics,
+    title="Latent Correctness Probe",
+    outpath="figs/probe_curve.png",
+)
+```
+
+The original plotting script can regenerate the six required experiment figures from cached CSVs:
+
+```powershell
+python .\src\plot_results.py `
+  --metrics-csv .\results\metrics_by_position.csv `
+  --predictions-csv .\results\predictions.csv `
+  --output-dir .\figs `
+  --dpi 160
+```
+
+## Reproducibility and scientific safeguards
+
+- Use a fixed seed and preserve the exact split manifest.
+- Keep training, validation, and held-out test questions disjoint.
+- Do not tune thresholds, steering coefficients, or prompt policies on the final test split.
+- Report unparseable answers separately instead of silently converting them to incorrect.
+- Compare against majority/prevalence and metadata baselines.
+- Treat results without problem IDs as **unvalidated**, not as evidence of generalization.
+- A high AUROC does not establish causality, model consciousness, or a reliable intervention policy.
+
+## Tests
+
+```powershell
+.\.venv\Scripts\python.exe -m pytest -q
+```
+
+Tests cover numeric parsing, correctness labels, token checkpoint selection, and synthetic plot generation. Synthetic fixtures are never mixed with real research outputs.
+
+## Outputs
+
+Generated artifacts belong in:
+
+- `runs/`: raw JSONL generation records
+- `results/`: metrics, predictions, summaries, and metadata audits
+- `figs/`: publication-quality PNG figures
+
+Downloaded model weights, virtual environments, API keys, large hidden-state arrays, and generated traces should not be committed.
