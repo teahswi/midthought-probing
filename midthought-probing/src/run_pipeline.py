@@ -1,4 +1,5 @@
 import argparse
+import sys
 from pathlib import Path
 
 from common import APP_ROOT, load_config, seed_everything
@@ -38,12 +39,13 @@ def main() -> int:
         model_name = debug_model
     print(f'Using model: {model_name}')
 
-    run_command(['python', str(APP_ROOT / 'src' / 'load_dataset.py'), '--config', args.config, '--sample-limit', str(limit), '--seed', str(args.seed)])
-    run_command(['python', str(APP_ROOT / 'src' / 'generate_traces.py'), '--config', args.config, '--split', 'test', '--sample-limit', str(limit), '--model-name', model_name, '--seed', str(args.seed)])
-    run_command(['python', str(APP_ROOT / 'src' / 'extract_hidden_states.py'), '--config', args.config, '--trace-csv', str(APP_ROOT / config.get('trace_dir', 'data/traces') / 'trace_records.csv'), '--model-name', model_name, '--output-dir', str(APP_ROOT / config.get('hidden_state_dir', 'data/hidden_states'))])
-    run_command(['python', str(APP_ROOT / 'src' / 'train_probe.py'), '--config', args.config, '--hidden-csv', str(APP_ROOT / config.get('hidden_state_dir', 'data/hidden_states') / 'hidden_state_snapshots.csv'), '--trace-csv', str(APP_ROOT / config.get('trace_dir', 'data/traces') / 'trace_records.csv'), '--dataset-manifest', str(APP_ROOT / config.get('manifest_dir', 'data/manifests') / 'dataset_manifest.csv'), '--seed', str(args.seed), '--output-dir', str(APP_ROOT / config.get('output_dir', 'results'))])
-    run_command(['python', str(APP_ROOT / 'src' / 'evaluate.py'), '--config', args.config, '--metrics-csv', str(APP_ROOT / config.get('output_dir', 'results') / 'metrics_by_position.csv'), '--output-dir', str(APP_ROOT / config.get('output_dir', 'results'))])
-    run_command(['python', str(APP_ROOT / 'src' / 'plot_results.py'), '--config', args.config, '--metrics-csv', str(APP_ROOT / config.get('output_dir', 'results') / 'metrics_by_position.csv'), '--predictions-csv', str(APP_ROOT / config.get('output_dir', 'results') / 'predictions.csv'), '--output-dir', str(APP_ROOT / config.get('figure_dir', 'results/figures'))])
+    python = sys.executable
+    run_command([python, str(APP_ROOT / 'src' / 'load_dataset.py'), '--config', args.config, '--sample-limit', str(limit), '--seed', str(args.seed)])
+    run_command([python, str(APP_ROOT / 'src' / 'generate_traces.py'), '--config', args.config, '--split', 'test', '--sample-limit', str(limit), '--model-name', model_name, '--seed', str(args.seed)])
+    run_command([python, str(APP_ROOT / 'src' / 'extract_hidden_states.py'), '--config', args.config, '--trace-csv', str(APP_ROOT / config.get('trace_dir', 'data/traces') / 'trace_records.csv'), '--model-name', model_name, '--output-dir', str(APP_ROOT / config.get('hidden_state_dir', 'data/hidden_states'))])
+    run_command([python, str(APP_ROOT / 'src' / 'train_probe.py'), '--config', args.config, '--hidden-csv', str(APP_ROOT / config.get('hidden_state_dir', 'data/hidden_states') / 'hidden_state_snapshots.csv'), '--trace-csv', str(APP_ROOT / config.get('trace_dir', 'data/traces') / 'trace_records.csv'), '--dataset-manifest', str(APP_ROOT / config.get('manifest_dir', 'data/manifests') / 'dataset_manifest.csv'), '--seed', str(args.seed), '--output-dir', str(APP_ROOT / config.get('output_dir', 'results'))])
+    run_command([python, str(APP_ROOT / 'src' / 'evaluate.py'), '--config', args.config, '--metrics-csv', str(APP_ROOT / config.get('output_dir', 'results') / 'metrics_by_position.csv'), '--output-dir', str(APP_ROOT / config.get('output_dir', 'results'))])
+    run_command([python, str(APP_ROOT / 'src' / 'plot_results.py'), '--config', args.config, '--metrics-csv', str(APP_ROOT / config.get('output_dir', 'results') / 'metrics_by_position.csv'), '--predictions-csv', str(APP_ROOT / config.get('output_dir', 'results') / 'predictions.csv'), '--output-dir', str(APP_ROOT / config.get('figure_dir', 'results/figures'))])
 
     print('Pipeline complete.')
     return 0
