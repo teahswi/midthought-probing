@@ -21,8 +21,22 @@ def load_config(path: str) -> dict:
     return json.loads(config_path.read_text(encoding="utf-8"))
 
 
-def run_legacy(script: str, config: dict, dry_run: bool):
-    command = [sys.executable, str(ROOT / "src" / script), "--config", str(ROOT / "config" / "experiment.json")]
+def run_legacy(
+    script: str,
+    config_input: dict | str | Path,
+    dry_run: bool = False,
+    extra_args: list[str] | None = None,
+) -> int:
+    if isinstance(config_input, (str, Path)):
+        config_path = str(Path(config_input).resolve())
+    elif isinstance(config_input, dict) and "_path" in config_input:
+        config_path = str(Path(config_input["_path"]).resolve())
+    else:
+        config_path = str(ROOT / "config" / "experiment.json")
+
+    command = [sys.executable, str(ROOT / "src" / script), "--config", config_path]
+    if extra_args:
+        command.extend(extra_args)
     if dry_run:
         print("DRY RUN:", " ".join(command))
         return 0
@@ -47,18 +61,20 @@ def main() -> int:
         sub.add_argument("--dry-run", action="store_true")
     args = parser.parse_args()
     config = load_config(args.config)
+    config_path = args.config
     if args.command == "make-splits":
-        return run_legacy("load_dataset.py", config, args.dry_run)
+        return run_legacy("load_dataset.py", config_path, args.dry_run)
     if args.command == "generation":
-        return run_legacy("generate_traces.py", config, args.dry_run)
+        extra = ["--split", args.split] if args.split else None
+        return run_legacy("generate_traces.py", config_path, args.dry_run, extra_args=extra)
     if args.command == "hidden-state-extraction":
-        return run_legacy("extract_hidden_states.py", config, args.dry_run)
+        return run_legacy("extract_hidden_states.py", config_path, args.dry_run)
     if args.command == "probe-training":
-        return run_legacy("train_probe.py", config, args.dry_run)
+        return run_legacy("train_probe.py", config_path, args.dry_run)
     if args.command == "baseline-evaluation":
-        return run_legacy("evaluate.py", config, args.dry_run)
+        return run_legacy("evaluate.py", config_path, args.dry_run)
     if args.command == "plotting":
-        return run_legacy("plot_results.py", config, args.dry_run)
+        return run_legacy("plot_results.py", config_path, args.dry_run)
     print("intervention-run is reserved for a future controlled intervention module.")
     return 0
 

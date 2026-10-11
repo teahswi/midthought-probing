@@ -6,7 +6,7 @@ from pathlib import Path
 import torch
 from transformers import AutoModelForCausalLM, AutoTokenizer
 
-from common import APP_ROOT, ensure_dir, load_config
+from common import APP_ROOT, ensure_dir, find_reasoning_boundary, load_config
 
 
 def read_csv_rows(path: str | Path):
@@ -47,10 +47,17 @@ def extract_snapshot_features(question: str, generated_response: str, tokenizer,
     layer_id = len(all_hidden) + layer_index if layer_index < 0 else layer_index
     output_states = all_hidden[layer_id]
     hidden_matrix = output_states[0].detach().cpu().numpy()
+    del all_hidden, outputs
+    if torch.cuda.is_available():
+        torch.cuda.empty_cache()
+
     prompt_input_ids = tokenizer(prompt, return_tensors='pt', add_special_tokens=False)['input_ids'][0]
     prompt_length = len(prompt_input_ids)
 
-    reasoning_tokens = tokenizer(generated_response, add_special_tokens=False, return_attention_mask=False)['input_ids']
+    # Strictly isolate reasoning tokens prior to the final answer boundary
+    boundary = find_reasoning_boundary(generated_response)
+    reasoning_text = generated_response[:boundary].rstrip() if boundary > 0 else generated_response
+    reasoning_tokens = tokenizer(reasoning_text, add_special_tokens=False, return_attention_mask=False)['input_ids']
     reasoning_positions = [int(round(len(reasoning_tokens) * ratio / 100.0)) for ratio in percentages]
     allowed = []
     for progress, reasoning_index in zip(percentages, reasoning_positions):

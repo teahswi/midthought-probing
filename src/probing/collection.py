@@ -23,12 +23,21 @@ def build_probe_data(
         label = correctness_label(example["answer"], generated["final_answer"])
         if label is None:
             continue
+
+        # Enforce answer-free reasoning prefix tokens
+        reasoning_tokens = generated.get("reasoning_token_ids")
+        if reasoning_tokens is None:
+            reasoning_tokens = generated["token_ids"]
+        if len(reasoning_tokens) == 0:
+            continue
+
         snapshots = extract_prefix_states(
             model,
             tokenizer,
             generated["prompt"],
-            generated["token_ids"],
+            reasoning_tokens,
             layer_index=layer_index,
+            check_leakage=True,
         )
         for step, vector in snapshots.items():
             features_by_t[step].append(vector)
@@ -38,6 +47,8 @@ def build_probe_data(
                 "example_id": example.get("id", str(index)),
                 "label": label,
                 "generated_answer": generated["final_answer"],
+                "reasoning_token_count": len(reasoning_tokens),
+                "total_token_count": len(generated["token_ids"]),
             }
         )
     return features_by_t, labels_by_t, metadata

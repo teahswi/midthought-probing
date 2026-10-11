@@ -1,42 +1,14 @@
 import argparse
 import csv
 import json
+import sys
 from pathlib import Path
 
 import numpy as np
-from sklearn.linear_model import LogisticRegression
-from sklearn.metrics import accuracy_score, balanced_accuracy_score, brier_score_loss, f1_score, precision_score, recall_score, roc_auc_score
-from sklearn.preprocessing import StandardScaler
 
 from common import APP_ROOT, ensure_dir, load_config, numeric_correctness, seed_everything
-
-
-def read_csv_rows(path: str | Path):
-    with open(path, 'r', encoding='utf-8', newline='') as fh:
-        return list(csv.DictReader(fh))
-
-
-def write_csv(path: str | Path, fieldnames: list[str], rows: list[dict]):
-    path = Path(path)
-    path.parent.mkdir(parents=True, exist_ok=True)
-    with open(path, 'w', newline='', encoding='utf-8') as fh:
-        writer = csv.DictWriter(fh, fieldnames=fieldnames)
-        writer.writeheader()
-        writer.writerows(rows)
-
-
-def compute_metrics(y_true, y_prob):
-    y_pred = (y_prob >= 0.5).astype(int)
-    metrics = {
-        'accuracy': accuracy_score(y_true, y_pred),
-        'balanced_accuracy': balanced_accuracy_score(y_true, y_pred),
-        'precision': precision_score(y_true, y_pred, zero_division=0),
-        'recall': recall_score(y_true, y_pred, zero_division=0),
-        'f1': f1_score(y_true, y_pred, zero_division=0),
-        'brier_score': brier_score_loss(y_true, y_prob),
-        'auroc': roc_auc_score(y_true, y_prob) if len(np.unique(y_true)) > 1 else float('nan'),
-    }
-    return metrics
+sys.path.insert(0, str(APP_ROOT / "src"))
+from probing.probes import run_probe
 
 
 def main() -> int:
@@ -98,20 +70,15 @@ def main() -> int:
         X_test = np.vstack([np.asarray(row['feature_vector'], dtype=float) for row in test_rows])
         y_test = np.asarray([int(row['correctness']) for row in test_rows], dtype=int)
 
-        scaler = StandardScaler()
-        X_train_scaled = scaler.fit_transform(X_train)
-        X_test_scaled = scaler.transform(X_test)
-
-        clf = LogisticRegression(max_iter=2000, solver='liblinear', class_weight='balanced', random_state=args.seed)
-        clf.fit(X_train_scaled, y_train)
-        y_prob = clf.predict_proba(X_test_scaled)[:, 1]
-
-        metrics = compute_metrics(y_test, y_prob)
+        metrics = run_probe(X_train, y_train, X_test, y_test, seed=args.seed)
+        y_prob = np.asarray(metrics['probabilities'])
+        pred = (y_prob >= 0.5).astype(int)
+        metrics['accuracy'] = float(np.mean(pred == y_test))
         metrics['progress'] = float(progress)
         metrics['n_train'] = len(train_rows)
         metrics['n_test'] = len(test_rows)
         metrics['positive_rate'] = float(y_test.mean())
-        metrics['majority_acc'] = max(float(y_test.mean()), 1.0 - float(y_test.mean()))
+        metrics['majority_acc'] = metrics.get('majority_acc', max(float(y_test.mean()), 1.0 - float(y_test.mean())))
         rows.append(metrics)
 
         for record, prob in zip(test_rows, y_prob):
